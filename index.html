@@ -1,0 +1,333 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover" />
+  <meta name="theme-color" content="#0b0d10" />
+  <meta name="description" content="Organizador personal de carpetas, tareas, contactos y archivos, con sincronización opcional en OneDrive." />
+  <title>R19 Management</title>
+
+  <!--
+    IMPORTANTE SOBRE PWA EN UN ÚNICO ARCHIVO:
+    Este index.html funciona por sí solo y conserva datos localmente. Para que los navegadores
+    permitan una instalación PWA completa y caché offline del propio HTML, GitHub Pages deberá
+    servir además un manifest.webmanifest y un sw.js. Un Service Worker no puede registrarse
+    de forma fiable desde un blob/data URL por restricciones de seguridad del navegador.
+    La aplicación sigue siendo totalmente usable y responsive con este único archivo.
+  -->
+
+  <!-- Librería oficial MSAL Browser. En producción puedes fijar una versión concreta. -->
+  <script src="https://cdn.jsdelivr.net/npm/@azure/msal-browser@4.26.2/lib/msal-browser.min.js"></script>
+
+  <style>
+    :root{
+      color-scheme:dark;
+      --bg:#090b0e;--panel:#11151a;--panel2:#171c22;--line:#2b323b;
+      --text:#f5f7fa;--muted:#9ba6b2;--accent:#7c5cff;--accent2:#34d399;
+      --danger:#fb7185;--shadow:0 24px 70px rgba(0,0,0,.45);--radius:22px;
+    }
+    *{box-sizing:border-box} html{scroll-behavior:smooth}
+    body{margin:0;min-height:100vh;font-family:Inter,ui-sans-serif,system-ui,-apple-system,"Segoe UI",sans-serif;background:
+      radial-gradient(circle at 15% 0%,rgba(124,92,255,.17),transparent 31%),
+      radial-gradient(circle at 90% 10%,rgba(52,211,153,.09),transparent 25%),var(--bg);color:var(--text)}
+    button,input,textarea,select{font:inherit} button{cursor:pointer}
+    a{color:#a99aff}.hidden{display:none!important}
+    .shell{width:min(1180px,calc(100% - 28px));margin:28px auto;padding:clamp(18px,3vw,34px);background:rgba(17,21,26,.88);border:1px solid rgba(255,255,255,.08);border-radius:28px;box-shadow:var(--shadow);backdrop-filter:blur(18px)}
+    .topbar{display:flex;align-items:center;justify-content:space-between;gap:16px;margin-bottom:28px}
+    .brand{display:flex;align-items:center;gap:13px}.brand-mark{width:45px;height:45px;display:grid;place-items:center;border-radius:15px;background:linear-gradient(135deg,var(--accent),#4f8fff);box-shadow:0 12px 30px rgba(124,92,255,.3);font-size:22px}
+    h1,h2,h3,p{margin-top:0}.brand h1{font-size:clamp(20px,3vw,29px);margin:0}.brand small{color:var(--muted)}
+    .top-actions,.row{display:flex;align-items:center;gap:10px;flex-wrap:wrap}
+    .btn{border:1px solid var(--line);color:var(--text);background:#181d23;border-radius:13px;padding:11px 15px;font-weight:700;transition:.18s transform,.18s border-color,.18s background}
+    .btn:hover{transform:translateY(-1px);border-color:#56616e}.btn.primary{background:linear-gradient(135deg,var(--accent),#5c7cff);border-color:transparent}.btn.success{background:#123f32;border-color:#256c55}.btn.danger{color:#ffc1cb}.btn.ghost{background:transparent}.btn.small{padding:8px 10px;font-size:13px}
+    .status{font-size:12px;color:var(--muted);padding:7px 10px;border:1px solid var(--line);border-radius:999px}.status.online{color:#9ff2cf;border-color:#275d4a}
+    .view-head{display:flex;justify-content:space-between;align-items:flex-end;gap:16px;margin-bottom:18px}.view-head h2{margin-bottom:5px;font-size:clamp(23px,4vw,34px)}.muted{color:var(--muted)}
+    .folder-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(210px,1fr));gap:15px}
+    .folder-card{position:relative;min-height:165px;padding:20px;border:1px solid var(--line);border-radius:20px;background:linear-gradient(145deg,rgba(255,255,255,.035),rgba(255,255,255,.012));overflow:hidden;transition:.2s transform,.2s border-color;text-align:left;color:var(--text)}
+    .folder-card:hover{transform:translateY(-3px);border-color:var(--folder-color,#6b7280)}
+    .folder-card:before{content:"";position:absolute;inset:0 0 auto;height:4px;background:var(--folder-color,#6b7280)}
+    .folder-icon{font-size:34px;margin:5px 0 18px}.folder-card h3{margin-bottom:7px}.count{color:var(--muted);font-size:14px}
+    .folder-tools{position:absolute;right:10px;top:11px;display:flex;gap:5px}.icon-btn{border:0;background:rgba(0,0,0,.28);color:var(--muted);width:31px;height:31px;border-radius:10px}.icon-btn:hover{color:white;background:rgba(255,255,255,.1)}
+    .contact-special{--folder-color:#34d399}.new-card{display:grid;place-items:center;border-style:dashed;color:var(--muted)}
+    .panel{background:var(--panel2);border:1px solid var(--line);border-radius:20px;padding:18px;margin-bottom:18px}
+    .form-grid{display:grid;grid-template-columns:1.5fr 1fr;gap:12px}.full{grid-column:1/-1}
+    label{display:block;font-size:13px;color:var(--muted);margin-bottom:7px}
+    input,textarea,select{width:100%;border:1px solid var(--line);border-radius:13px;background:#0e1216;color:var(--text);padding:12px 13px;outline:none}input:focus,textarea:focus,select:focus{border-color:var(--accent)}textarea{min-height:93px;resize:vertical}
+    details{border:1px solid var(--line);border-radius:14px;padding:10px 12px;background:#0e1216}summary{cursor:pointer;color:#c6cdd5;font-weight:700}details textarea{margin-top:10px}
+    .file-zone{display:flex;align-items:center;justify-content:space-between;gap:10px;border:1px dashed #46505d;border-radius:14px;padding:12px;background:#0e1216}.file-zone input{border:0;padding:0;background:transparent}.file-hint{font-size:12px;color:var(--muted)}
+    .task-list,.contact-list{display:grid;gap:12px}.empty{padding:32px;text-align:center;color:var(--muted);border:1px dashed var(--line);border-radius:18px}
+    .task{display:grid;grid-template-columns:auto 1fr auto;gap:13px;align-items:start;padding:16px;border:1px solid var(--line);border-radius:17px;background:#12171c}.task.done{opacity:.62}.task.done .task-title{text-decoration:line-through}.check{width:22px;height:22px;accent-color:var(--accent);margin-top:3px}.task-title{font-weight:800;font-size:16px}.task-note{margin:8px 0 0;color:#bcc5ce;white-space:pre-wrap;line-height:1.45}.task-meta{font-size:12px;color:var(--muted);margin-top:7px}.attachments{display:flex;flex-wrap:wrap;gap:8px;margin-top:11px}.attachment{display:flex;align-items:center;gap:8px;background:#0d1115;border:1px solid var(--line);padding:8px 10px;border-radius:11px;font-size:12px}.attachment img{width:40px;height:40px;object-fit:cover;border-radius:8px}.attachment a{text-decoration:none}.attachment button{border:0;background:transparent;color:var(--danger)}
+    .contact{padding:17px;border:1px solid var(--line);border-radius:17px;background:#12171c;display:grid;grid-template-columns:1fr auto;gap:12px}.contact h3{margin-bottom:8px}.contact-links{display:flex;gap:12px;flex-wrap:wrap}.contact-links a{text-decoration:none}.contact-notes{color:#b7c0ca;margin-top:10px;white-space:pre-wrap}.contact-actions{display:flex;gap:6px}
+    .modal-backdrop{position:fixed;inset:0;background:rgba(0,0,0,.74);display:grid;place-items:center;padding:18px;z-index:20}.modal{width:min(520px,100%);max-height:90vh;overflow:auto;background:#151a20;border:1px solid var(--line);border-radius:22px;padding:22px;box-shadow:var(--shadow)}.modal-head{display:flex;justify-content:space-between;align-items:center;margin-bottom:18px}.modal-head h2{margin:0}.color-row,.icon-row{display:flex;gap:9px;flex-wrap:wrap}.swatch,.emoji-choice{width:39px;height:39px;border-radius:12px;border:2px solid transparent;background:#222831;color:white}.swatch.selected,.emoji-choice.selected{border-color:white}.emoji-choice{font-size:19px}
+    .toast{position:fixed;right:20px;bottom:20px;max-width:min(420px,calc(100% - 40px));padding:13px 16px;background:#20262e;border:1px solid #3b4551;border-radius:14px;box-shadow:var(--shadow);z-index:40;animation:in .2s ease}.toast.error{border-color:#8f3548}@keyframes in{from{transform:translateY(10px);opacity:0}}
+    .sync-info{margin-top:18px;font-size:12px;color:var(--muted)}
+    @media(max-width:720px){.shell{width:100%;min-height:100vh;margin:0;border-radius:0;padding:18px}.topbar,.view-head{align-items:flex-start}.topbar{flex-direction:column}.top-actions{width:100%}.top-actions .btn{flex:1}.form-grid{grid-template-columns:1fr}.folder-grid{grid-template-columns:repeat(2,minmax(0,1fr))}.folder-card{min-height:150px;padding:16px}.contact{grid-template-columns:1fr}.task{grid-template-columns:auto 1fr}.task>.icon-btn{grid-column:2;justify-self:end}}
+    @media(max-width:430px){.folder-grid{grid-template-columns:1fr}.brand small{display:none}}
+  </style>
+</head>
+<body>
+  <main class="shell">
+    <header class="topbar">
+      <div class="brand"><div class="brand-mark">✓</div><div><h1>R19 Management</h1><small>Gestión de la Comunidad R19</small></div></div>
+      <div class="top-actions">
+        <span id="syncStatus" class="status">Solo local</span>
+        <button id="syncBtn" class="btn ghost hidden">↻ Sincronizar</button>
+        <button id="authBtn" class="btn">☁ Conectar OneDrive</button>
+      </div>
+    </header>
+
+    <section id="foldersView">
+      <div class="view-head"><div><h2>R19 Management</h2><p class="muted">Tareas, documentación y contactos de la comunidad.</p></div></div>
+      <div id="folderGrid" class="folder-grid"></div>
+      <p class="sync-info">Los datos se guardan automáticamente en este navegador. Al conectar OneDrive, R19 Management sincroniza la base de datos y los adjuntos en la carpeta privada de la aplicación.</p>
+    </section>
+
+    <section id="folderView" class="hidden">
+      <div class="view-head"><div><button class="btn ghost backBtn">← Volver a carpetas</button><h2 id="folderTitle" style="margin-top:16px"></h2><p id="folderSubtitle" class="muted"></p></div></div>
+      <form id="taskForm" class="panel">
+        <h3>Añadir tarea</h3>
+        <div class="form-grid">
+          <div class="full"><label for="taskTitle">Título</label><input id="taskTitle" required maxlength="160" placeholder="Ej. Pedir presupuesto de reparación" /></div>
+          <details class="full"><summary>Añadir texto o resumen de correo</summary><textarea id="taskEmail" placeholder="Pega aquí el correo, el resumen o las notas importantes..."></textarea></details>
+          <div class="full"><label for="taskFiles">Adjuntar archivos o hacer foto</label><div class="file-zone"><input id="taskFiles" type="file" multiple accept="image/*,.pdf,.doc,.docx" capture="environment"/><span class="file-hint">Imágenes, PDF y Word</span></div></div>
+          <div class="full row"><button class="btn primary" type="submit">+ Añadir tarea</button><span id="fileSelection" class="muted"></span></div>
+        </div>
+      </form>
+      <div id="taskList" class="task-list"></div>
+    </section>
+
+    <section id="contactsView" class="hidden">
+      <div class="view-head"><div><button class="btn ghost backBtn">← Volver a carpetas</button><h2 style="margin-top:16px">Contactos</h2><p class="muted">Personas y datos útiles siempre a mano.</p></div></div>
+      <form id="contactForm" class="panel">
+        <h3>Nuevo contacto</h3>
+        <div class="form-grid">
+          <div><label>Nombre</label><input id="contactName" required maxlength="120" /></div>
+          <div><label>Teléfono</label><input id="contactPhone" inputmode="tel" /></div>
+          <div class="full"><label>Email</label><input id="contactEmail" type="email" /></div>
+          <div class="full"><label>Notas</label><textarea id="contactNotes"></textarea></div>
+          <div class="full"><button class="btn primary" type="submit">+ Guardar contacto</button></div>
+        </div>
+      </form>
+      <div id="contactList" class="contact-list"></div>
+    </section>
+  </main>
+
+  <div id="folderModal" class="modal-backdrop hidden" role="dialog" aria-modal="true">
+    <form id="folderForm" class="modal">
+      <div class="modal-head"><h2 id="folderModalTitle">Nueva carpeta</h2><button type="button" class="icon-btn" id="closeFolderModal">✕</button></div>
+      <input id="editingFolderId" type="hidden" />
+      <label>Nombre</label><input id="folderName" required maxlength="70" placeholder="Ej. Administración" />
+      <label style="margin-top:16px">Color</label><div id="colorChoices" class="color-row"></div>
+      <label style="margin-top:16px">Icono</label><div id="iconChoices" class="icon-row"></div>
+      <div class="row" style="margin-top:22px"><button class="btn primary" type="submit">Guardar</button><button class="btn" type="button" id="cancelFolderModal">Cancelar</button></div>
+    </form>
+  </div>
+
+  <div id="toast" class="toast hidden" role="status"></div>
+
+<script>
+'use strict';
+/* ========================================================================
+   CONFIGURACIÓN MICROSOFT ENTRA / ONEDRIVE
+   1) Registra una SPA en https://entra.microsoft.com/ > App registrations.
+   2) En Authentication, añade como Redirect URI de tipo "Single-page application":
+      - Para GitHub Pages: https://TU_USUARIO.github.io/TU_REPOSITORIO/
+      - Para pruebas: http://localhost:5500/ (no abras el HTML con file://)
+   3) En Supported account types elige cuentas personales de Microsoft o ambos tipos.
+   4) En API permissions agrega Microsoft Graph > Delegated:
+      Files.ReadWrite.AppFolder, Mail.Send, User.Read y openid/profile/offline_access.
+   5) PEGA TU CLIENT ID ENTRE LAS COMILLAS DE ABAJO.
+
+   OneDrive crea la carpeta real como /Apps/NOMBRE_DE_LA_APLICACIÓN.
+   Para obtener exactamente /Apps/R19 Management, asigna "R19 Management" como nombre
+   visible de la aplicación en Entra. No se guarda ninguna contraseña en este archivo.
+   ======================================================================== */
+const MICROSOFT_CLIENT_ID = "PEGA_AQUI_TU_CLIENT_ID";
+const AUTHORITY = "https://login.microsoftonline.com/common";
+const GRAPH_SCOPES = ["User.Read", "Files.ReadWrite.AppFolder", "Mail.Send"];
+// PEGA AQUÍ EL EMAIL PERMANENTE DEL ADMINISTRADOR DE LA COMUNIDAD.
+const ADMIN_EMAIL = josemango@hotmail.com;
+const GRAPH_ROOT = "https://graph.microsoft.com/v1.0";
+const DATA_FILE = "r19-management.json";
+const ATTACHMENTS_DIR = "Adjuntos";
+
+const STORAGE_KEY = "r19ManagementDataV1";
+const DB_NAME = "R19ManagementDB";
+const DB_STORE = "attachments";
+const COLORS = ["#7c5cff","#3b82f6","#06b6d4","#34d399","#f59e0b","#f97316","#fb7185","#a78bfa"];
+const ICONS = ["📁","🏠","🧾","🔧","💼","📌","📚","🚗","💡","🛒","🏢","🗂️"];
+
+const freshData = () => ({version:1,updatedAt:new Date().toISOString(),folders:[
+  {id:"documentation",name:"Documentación",color:"#3b82f6",icon:"🗂️",createdAt:new Date().toISOString()}
+],tasks:[],contacts:[]});
+let data = loadData();
+let currentFolderId = null;
+let selectedColor = COLORS[0];
+let selectedIcon = ICONS[0];
+let msalInstance = null;
+let account = null;
+let syncTimer = null;
+
+const $ = s => document.querySelector(s);
+const el = (tag, cls, text) => { const n=document.createElement(tag); if(cls)n.className=cls; if(text!==undefined)n.textContent=text; return n; };
+const escapeHtml = value => String(value ?? "").replace(/[&<>'"]/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;","'":"&#39;",'"':"&quot;"}[c]));
+const safeFileName = name => name.replace(/[\\/:*?"<>|#%]/g,"_").slice(0,120);
+
+function loadData(){
+  try{ const parsed=JSON.parse(localStorage.getItem(STORAGE_KEY)); return parsed && Array.isArray(parsed.folders) ? parsed : freshData(); }
+  catch{ return freshData(); }
+}
+function saveLocal({scheduleSync=true}={}){
+  data.updatedAt=new Date().toISOString(); localStorage.setItem(STORAGE_KEY,JSON.stringify(data));
+  if(scheduleSync && account){ clearTimeout(syncTimer); syncTimer=setTimeout(()=>syncToOneDrive(false),1200); }
+}
+function toast(message,error=false){ const t=$("#toast"); t.textContent=message; t.className="toast"+(error?" error":""); clearTimeout(t._timer); t._timer=setTimeout(()=>t.classList.add("hidden"),3500); }
+function showView(id){ ["#foldersView","#folderView","#contactsView"].forEach(v=>$(v).classList.add("hidden")); $(id).classList.remove("hidden"); scrollTo({top:0,behavior:"smooth"}); }
+function formatDate(iso){ try{return new Intl.DateTimeFormat("es-ES",{dateStyle:"medium",timeStyle:"short"}).format(new Date(iso));}catch{return "";} }
+
+function renderFolders(){
+  const grid=$("#folderGrid"); grid.innerHTML="";
+  const fixed=[
+    {key:"pending",name:"Tareas pendientes",icon:"📌",color:"#f59e0b",count:data.tasks.filter(t=>!t.done).length},
+    {key:"completed",name:"Tareas completadas",icon:"✅",color:"#34d399",count:data.tasks.filter(t=>t.done).length},
+    {key:"documentation",name:"Documentación",icon:"🗂️",color:"#3b82f6",count:data.tasks.filter(t=>t.folderId==="documentation").length},
+    {key:"contacts",name:"Contactos",icon:"👥",color:"#a78bfa",count:data.contacts.length}
+  ];
+  fixed.forEach(f=>{
+    const card=el("button","folder-card");card.type="button";card.style.setProperty("--folder-color",f.color);
+    card.innerHTML=`<div class="folder-icon">${f.icon}</div><h3>${f.name}</h3><div class="count">${f.count} ${f.key==="contacts"?"contactos":"elementos"}</div>`;
+    card.onclick=()=>{if(f.key==="contacts"){renderContacts();showView("#contactsView");return;} currentFolderId=f.key;$("#folderTitle").textContent=`${f.icon} ${f.name}`;$("#folderSubtitle").textContent=f.key==="pending"?"Gestión y comunicación de asuntos abiertos":f.key==="completed"?"Histórico de tareas cerradas":"Archivo documental de la comunidad";renderTasks();showView("#folderView")};grid.append(card)
+  });
+}
+function openFolder(id){ currentFolderId=id; const folder=data.folders.find(f=>f.id===id); if(!folder)return; $("#folderTitle").textContent=`${folder.icon} ${folder.name}`; const pending=data.tasks.filter(t=>t.folderId===id&&!t.done).length; $("#folderSubtitle").textContent=`${pending} tareas pendientes`; renderTasks(); showView("#folderView"); }
+function openFolderModal(folder=null){
+  $("#folderForm").reset(); $("#editingFolderId").value=folder?.id||""; $("#folderModalTitle").textContent=folder?"Editar carpeta":"Nueva carpeta"; $("#folderName").value=folder?.name||""; selectedColor=folder?.color||COLORS[0]; selectedIcon=folder?.icon||ICONS[0]; renderChoices(); $("#folderModal").classList.remove("hidden"); setTimeout(()=>$("#folderName").focus(),30);
+}
+function closeFolderModal(){ $("#folderModal").classList.add("hidden"); }
+function renderChoices(){
+  const colors=$("#colorChoices"); colors.innerHTML=""; COLORS.forEach(c=>{const b=el("button","swatch"+(selectedColor===c?" selected":""));b.type="button";b.style.background=c;b.ariaLabel=`Color ${c}`;b.onclick=()=>{selectedColor=c;renderChoices()};colors.append(b)});
+  const icons=$("#iconChoices"); icons.innerHTML=""; ICONS.forEach(i=>{const b=el("button","emoji-choice"+(selectedIcon===i?" selected":""),i);b.type="button";b.onclick=()=>{selectedIcon=i;renderChoices()};icons.append(b)});
+}
+async function deleteFolder(id){
+  const folder=data.folders.find(f=>f.id===id); if(!folder||!confirm(`¿Eliminar "${folder.name}" y todas sus tareas?`))return;
+  const taskIds=data.tasks.filter(t=>t.folderId===id).map(t=>t.id); for(const task of data.tasks.filter(t=>taskIds.includes(t.id))) for(const a of task.attachments||[]) await idbDelete(a.localId);
+  data.tasks=data.tasks.filter(t=>!taskIds.includes(t.id)); data.folders=data.folders.filter(f=>f.id!==id); saveLocal(); renderFolders();
+}
+
+function renderTasks(){
+  const list=$("#taskList"); list.innerHTML=""; $("#taskForm").classList.toggle("hidden",currentFolderId==="completed"); const tasks=data.tasks.filter(t=>currentFolderId==="pending"?!t.done:currentFolderId==="completed"?t.done:t.folderId===currentFolderId).sort((a,b)=>Number(a.done)-Number(b.done)||new Date(b.createdAt)-new Date(a.createdAt));
+  if(!tasks.length){list.innerHTML=`<div class="empty">Todavía no hay tareas en esta carpeta.</div>`;return;}
+  tasks.forEach(task=>{
+    const card=el("article","task"+(task.done?" done":""));
+    const check=document.createElement("input"); check.type="checkbox"; check.className="check"; check.checked=task.done; check.ariaLabel="Marcar tarea como completada"; check.onchange=()=>{task.done=check.checked;task.completedAt=check.checked?new Date().toISOString():null;saveLocal();renderTasks();renderFolders();toast(check.checked?"Tarea movida a Tareas completadas.":"Tarea devuelta a pendientes.")};
+    const content=el("div"); content.innerHTML=`<div class="task-title">${escapeHtml(task.title)}</div>${task.emailNote?`<div class="task-note">${escapeHtml(task.emailNote)}</div>`:""}<div class="task-meta">Creada ${escapeHtml(formatDate(task.createdAt))}</div>`;
+    if(task.attachments?.length){ const wrap=el("div","attachments"); task.attachments.forEach(a=>wrap.append(renderAttachment(task,a))); content.append(wrap); }
+    const actions=el("div","contact-actions");
+    if(!task.done && currentFolderId==="pending"){const send=el("button","btn small","✉ Enviar a ADMON");send.type="button";send.onclick=()=>sendTaskToAdmin(task);actions.append(send)}
+    const del=el("button","icon-btn","×");del.title="Eliminar tarea";del.onclick=()=>deleteTask(task.id);actions.append(del);card.append(check,content,actions);list.append(card);
+  });
+}
+function renderAttachment(task,a){
+  const box=el("div","attachment");
+  const link=el("a",null,a.name); link.href=a.webUrl||"#"; link.target="_blank"; link.rel="noopener";
+  if(a.localId){
+    idbGet(a.localId).then(blob=>{if(!blob)return;const url=URL.createObjectURL(blob);link.href=url;if(blob.type.startsWith("image/")){const img=document.createElement("img");img.src=url;img.alt=a.name;box.prepend(img)}});
+  }
+  const remove=el("button",null,"×"); remove.title="Quitar adjunto"; remove.onclick=async()=>{if(!confirm("¿Quitar este adjunto de la tarea?"))return;await idbDelete(a.localId);task.attachments=task.attachments.filter(x=>x.id!==a.id);saveLocal();renderTasks();}; box.append(link,remove); return box;
+}
+async function deleteTask(id){ const task=data.tasks.find(t=>t.id===id); if(!task||!confirm("¿Eliminar esta tarea?"))return; for(const a of task.attachments||[])await idbDelete(a.localId); data.tasks=data.tasks.filter(t=>t.id!==id);saveLocal();renderTasks();renderFolders(); }
+
+function renderContacts(){
+  const list=$("#contactList");list.innerHTML="";const contacts=[...data.contacts].sort((a,b)=>a.name.localeCompare(b.name,"es"));
+  if(!contacts.length){list.innerHTML=`<div class="empty">Todavía no has añadido contactos.</div>`;return;}
+  contacts.forEach(c=>{const card=el("article","contact");const info=el("div");info.innerHTML=`<h3>${escapeHtml(c.name)}</h3><div class="contact-links">${c.phone?`<a href="tel:${escapeHtml(c.phone.replace(/[^+\d]/g,""))}">📞 ${escapeHtml(c.phone)}</a>`:""}${c.email?`<a href="mailto:${escapeHtml(c.email)}">✉ ${escapeHtml(c.email)}</a>`:""}</div>${c.notes?`<div class="contact-notes">${escapeHtml(c.notes)}</div>`:""}`;const actions=el("div","contact-actions");const edit=el("button","icon-btn","✎");edit.onclick=()=>editContact(c);const del=el("button","icon-btn","×");del.onclick=()=>{if(confirm(`¿Eliminar a ${c.name}?`)){data.contacts=data.contacts.filter(x=>x.id!==c.id);saveLocal();renderContacts();renderFolders()}};actions.append(edit,del);card.append(info,actions);list.append(card)});
+}
+function editContact(c){ $("#contactName").value=c.name;$("#contactPhone").value=c.phone||"";$("#contactEmail").value=c.email||"";$("#contactNotes").value=c.notes||"";data.contacts=data.contacts.filter(x=>x.id!==c.id);$("#contactName").focus(); }
+
+// IndexedDB conserva los binarios localmente, evitando llenar localStorage.
+function openDB(){return new Promise((resolve,reject)=>{const r=indexedDB.open(DB_NAME,1);r.onupgradeneeded=()=>r.result.createObjectStore(DB_STORE);r.onsuccess=()=>resolve(r.result);r.onerror=()=>reject(r.error)})}
+async function idbPut(id,blob){const db=await openDB();return new Promise((resolve,reject)=>{const tx=db.transaction(DB_STORE,"readwrite");tx.objectStore(DB_STORE).put(blob,id);tx.oncomplete=resolve;tx.onerror=()=>reject(tx.error)})}
+async function idbGet(id){if(!id)return null;const db=await openDB();return new Promise((resolve,reject)=>{const r=db.transaction(DB_STORE).objectStore(DB_STORE).get(id);r.onsuccess=()=>resolve(r.result||null);r.onerror=()=>reject(r.error)})}
+async function idbDelete(id){if(!id)return;const db=await openDB();return new Promise(resolve=>{const tx=db.transaction(DB_STORE,"readwrite");tx.objectStore(DB_STORE).delete(id);tx.oncomplete=resolve;tx.onerror=resolve})}
+
+// ---------------- Microsoft Graph / OneDrive ----------------
+async function initMicrosoft(){
+  if(MICROSOFT_CLIENT_ID.includes("PEGA_AQUI"))return;
+  try{
+    msalInstance=new msal.PublicClientApplication({auth:{clientId:MICROSOFT_CLIENT_ID,authority:AUTHORITY,redirectUri:location.origin+location.pathname},cache:{cacheLocation:"localStorage"}});
+    await msalInstance.initialize(); await msalInstance.handleRedirectPromise(); account=msalInstance.getAllAccounts()[0]||null; updateAuthUI();
+  }catch(e){console.error(e);toast("No se pudo inicializar Microsoft: "+e.message,true)}
+}
+function updateAuthUI(){ const btn=$("#authBtn"),status=$("#syncStatus"),sync=$("#syncBtn"); if(account){btn.textContent="Salir de OneDrive";status.textContent=account.username;status.classList.add("online");sync.classList.remove("hidden")}else{btn.textContent="☁ Conectar OneDrive";status.textContent="Solo local";status.classList.remove("online");sync.classList.add("hidden")} }
+async function loginOrLogout(){
+  if(account){await msalInstance.logoutPopup({account});account=null;updateAuthUI();return}
+  if(MICROSOFT_CLIENT_ID.includes("PEGA_AQUI")){toast("Primero pega tu Client ID en MICROSOFT_CLIENT_ID.",true);return}
+  if(!msalInstance)await initMicrosoft();
+  try{const result=await msalInstance.loginPopup({scopes:GRAPH_SCOPES,prompt:"select_account"});account=result.account;updateAuthUI();await syncFromOneDrive();}catch(e){if(e.errorCode!=="user_cancelled")toast("Inicio de sesión cancelado o fallido: "+e.message,true)}
+}
+async function getToken(){
+  if(!account)throw new Error("No hay sesión de Microsoft activa.");
+  try{return (await msalInstance.acquireTokenSilent({scopes:GRAPH_SCOPES,account})).accessToken}catch{return (await msalInstance.acquireTokenPopup({scopes:GRAPH_SCOPES,account})).accessToken}
+}
+async function graph(path,options={}){const token=await getToken();const response=await fetch(GRAPH_ROOT+path,{...options,headers:{Authorization:`Bearer ${token}`,...(options.headers||{})}});if(!response.ok){const text=await response.text();throw new Error(`Graph ${response.status}: ${text.slice(0,260)}`)}return response.status===204?null:response.json()}
+async function ensureAttachmentsFolder(){
+  try{return await graph(`/me/drive/special/approot:/${encodeURIComponent(ATTACHMENTS_DIR)}`)}catch(e){
+    if(!String(e.message).includes("404"))throw e;
+    return graph(`/me/drive/special/approot/children`,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({name:ATTACHMENTS_DIR,folder:{},"@microsoft.graph.conflictBehavior":"rename"})});
+  }
+}
+async function uploadSmallFile(relativePath,blob,contentType="application/octet-stream"){
+  return graph(`/me/drive/special/approot:/${relativePath.split("/").map(encodeURIComponent).join("/")}:/content`,{method:"PUT",headers:{"Content-Type":contentType},body:blob});
+}
+async function syncPendingAttachments(){
+  await ensureAttachmentsFolder();
+  for(const task of data.tasks){for(const a of task.attachments||[]){if(a.webUrl||!a.localId)continue;const blob=await idbGet(a.localId);if(!blob)continue;const remoteName=`${task.id}_${a.id}_${safeFileName(a.name)}`;const item=await uploadSmallFile(`${ATTACHMENTS_DIR}/${remoteName}`,blob,blob.type||a.type);a.webUrl=item.webUrl;a.driveItemId=item.id;a.remoteName=remoteName;}}
+}
+async function syncToOneDrive(showMessage=true){
+  if(!account)return;const status=$("#syncStatus");status.textContent="Sincronizando…";
+  try{await syncPendingAttachments();saveLocal({scheduleSync:false});const payload=new Blob([JSON.stringify(data,null,2)],{type:"application/json"});await uploadSmallFile(DATA_FILE,payload,"application/json");status.textContent="Sincronizado";status.classList.add("online");if(showMessage)toast("Datos sincronizados con OneDrive.")}
+  catch(e){console.error(e);status.textContent="Error de sincronización";toast(e.message,true)}
+}
+async function syncFromOneDrive(){
+  if(!account)return;try{
+    const token=await getToken();const response=await fetch(`${GRAPH_ROOT}/me/drive/special/approot:/${encodeURIComponent(DATA_FILE)}:/content`,{headers:{Authorization:`Bearer ${token}`}});
+    if(response.status===404){await syncToOneDrive();return}if(!response.ok)throw new Error(`No se pudo leer OneDrive (${response.status}).`);
+    const remote=await response.json();
+    if(!remote?.folders||!remote?.tasks||!remote?.contacts)throw new Error("El JSON remoto no tiene el formato esperado.");
+    const localTime=new Date(data.updatedAt||0),remoteTime=new Date(remote.updatedAt||0);
+    if(remoteTime>localTime||confirm("OneDrive contiene datos. ¿Reemplazar los datos locales por la copia de OneDrive?")){data=remote;saveLocal({scheduleSync:false});renderFolders();if(currentFolderId)renderTasks();renderContacts();toast("Datos cargados desde OneDrive.")}else await syncToOneDrive();
+  }catch(e){console.error(e);toast(e.message,true)}
+}
+
+async function blobToBase64(blob){return new Promise((resolve,reject)=>{const r=new FileReader();r.onload=()=>resolve(String(r.result).split(",")[1]);r.onerror=reject;r.readAsDataURL(blob)})}
+async function sendTaskToAdmin(task){
+  if(ADMIN_EMAIL.includes("PEGA_AQUI")){toast("Configura ADMIN_EMAIL en el código antes de enviar.",true);return}
+  if(!account){toast("Conecta primero tu cuenta Microsoft para enviar el email.",true);return}
+  if(!confirm(`¿Enviar esta tarea y sus adjuntos a ${ADMIN_EMAIL}?`))return;
+  try{
+    const attachments=[];
+    for(const a of task.attachments||[]){const blob=await idbGet(a.localId);if(blob){attachments.push({"@odata.type":"#microsoft.graph.fileAttachment",name:a.name,contentType:blob.type||a.type||"application/octet-stream",contentBytes:await blobToBase64(blob)})}}
+    const body=`<p>Buenos días,</p><p>Se comunica la siguiente tarea pendiente de la Comunidad R19:</p><p><strong>${escapeHtml(task.title)}</strong></p>${task.emailNote?`<p>${escapeHtml(task.emailNote).replace(/\n/g,"<br>")}</p>`:""}<p>Se adjuntan las fotografías/documentos disponibles.</p><p>Un saludo.</p>`;
+    await graph("/me/sendMail",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({message:{subject:`R19 - ${task.title}`,body:{contentType:"HTML",content:body},toRecipients:[{emailAddress:{address:ADMIN_EMAIL}}],attachments},saveToSentItems:true})});
+    task.sentToAdminAt=new Date().toISOString();saveLocal();renderTasks();toast("Email enviado al administrador.");
+  }catch(e){console.error(e);toast("No se pudo enviar: "+e.message,true)}
+}
+
+// ---------------- Eventos ----------------
+$("#closeFolderModal").onclick=$("#cancelFolderModal").onclick=closeFolderModal;
+$("#folderModal").addEventListener("click",e=>{if(e.target===$("#folderModal"))closeFolderModal()});
+$("#folderForm").addEventListener("submit",e=>{e.preventDefault();const id=$("#editingFolderId").value;const item=id?data.folders.find(f=>f.id===id):null;if(item){item.name=$("#folderName").value.trim();item.color=selectedColor;item.icon=selectedIcon}else data.folders.push({id:crypto.randomUUID(),name:$("#folderName").value.trim(),color:selectedColor,icon:selectedIcon,createdAt:new Date().toISOString()});saveLocal();renderFolders();closeFolderModal()});
+document.querySelectorAll(".backBtn").forEach(b=>b.onclick=()=>{renderFolders();showView("#foldersView")});
+$("#taskFiles").onchange=e=>$("#fileSelection").textContent=e.target.files.length?`${e.target.files.length} archivo(s) seleccionado(s)`:"";
+$("#taskForm").addEventListener("submit",async e=>{
+  e.preventDefault();const title=$("#taskTitle").value.trim();if(!title)return;const attachments=[];
+  for(const file of $("#taskFiles").files){const localId=crypto.randomUUID();await idbPut(localId,file);attachments.push({id:crypto.randomUUID(),localId,name:file.name,type:file.type,size:file.size,createdAt:new Date().toISOString(),webUrl:null})}
+  data.tasks.push({id:crypto.randomUUID(),folderId:currentFolderId,title,emailNote:$("#taskEmail").value.trim(),done:false,createdAt:new Date().toISOString(),attachments});e.target.reset();$("#fileSelection").textContent="";saveLocal();renderTasks();renderFolders();toast("Tarea añadida.");
+});
+$("#contactForm").addEventListener("submit",e=>{e.preventDefault();data.contacts.push({id:crypto.randomUUID(),name:$("#contactName").value.trim(),phone:$("#contactPhone").value.trim(),email:$("#contactEmail").value.trim(),notes:$("#contactNotes").value.trim(),createdAt:new Date().toISOString()});e.target.reset();saveLocal();renderContacts();renderFolders();toast("Contacto guardado.")});
+$("#authBtn").onclick=loginOrLogout;$("#syncBtn").onclick=()=>syncToOneDrive(true);
+window.addEventListener("online",()=>{if(account)syncToOneDrive(false)});
+
+renderFolders();initMicrosoft();
+</script>
+</body>
+</html>
